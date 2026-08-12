@@ -281,19 +281,104 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
+**Framework 1 = Lab RAGAS-inspired evaluator** (`template.py`, chính là công cụ
+đã dùng cho toàn bộ Exercise 3.2 — docstring của file tự mô tả là "RAGAS
+Evaluator (Simplified word-overlap heuristic)").
+**Framework 2 = DeepEval v4.1.7** (`pip install deepeval`, cài thật vào
+`.venv` cho bài này, không thêm vào `requirements.txt` vì không phải
+dependency bắt buộc của lab). Chọn DeepEval thay vì cài `ragas` thật vì
+DeepEval cài đặt nhẹ hơn, không đòi hỏi định dạng `EvaluationDataset` phức
+tạp, và `template.py` đã sẵn gợi ý dùng nó ở Task 3 (`FaithfulnessMetric`,
+`AnswerRelevancyMetric`).
+
+**Phương pháp:** chạy `FaithfulnessMetric` và `AnswerRelevancyMetric` của
+DeepEval (model `gpt-4o-mini` — cùng model với `domain_assistant.py`, threshold
+0.5 mặc định) trên đúng 8 case đã có sẵn actual answer + retrieved context
+thật trong `artifacts/actual_answers.json`: 2 case lab core chấm tốt (E03,
+E04), 2 case lab core chấm fail vì lệch từ vựng (M01, M04), 1 case retrieval
+gap thật (H04), và 3 case adversarial (A01, A02, A03) — đúng dải case đã phân
+tích trong `reflection.md`.
+
+| Tiêu chí | Framework 1: Lab RAGAS-inspired evaluator | Framework 2: DeepEval v4.1.7 |
 |---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Setup complexity | Không cần cài gì ngoài Python chuẩn (`re`); chạy tức thời, không gọi mạng; nhưng phải tự viết công thức (Task 2). | 1 lệnh `pip install deepeval`; cần `OPENAI_API_KEY` hợp lệ (dùng chung `.env`); mỗi `metric.measure()` gọi LLM thật nên chậm hơn nhiều (12–105 giây/case trong lần chạy này) và tốn phí API nhỏ. |
+| Metrics available | 3 answer-side (Faithfulness, Relevance, Completeness) + 2 retrieval-side (Context Recall, Context Precision) — công thức word-overlap tự viết, cố định. | Thư viện lớn: `FaithfulnessMetric`, `AnswerRelevancyMetric`, `ContextualRecallMetric`, `ContextualPrecisionMetric`, `HallucinationMetric`, `GEval` (rubric tùy biến)... Ở đây chỉ dùng 2 metric đầu để giữ phạm vi và chi phí hợp lý. |
+| CI/CD integration | Có sẵn `BenchmarkRunner.run_regression()` tự viết trong `template.py`, chạy offline, không phụ thuộc mạng — dễ nhúng CI vì deterministic. | Có `assert_test()` / `deepeval test run` (pytest plugin) tích hợp CI sẵn, nhưng mỗi lần CI chạy sẽ gọi LLM thật → chi phí lặp lại, độ trễ, và rủi ro flaky do LLM không hoàn toàn deterministic. |
+| Kết quả trên cùng dataset | Xem bảng thực nghiệm bên dưới (8/8 case, đã chạy thật ở Exercise 3.2). | Xem bảng thực nghiệm bên dưới (8/8 case, chạy thật bằng `gpt-4o-mini`). |
+| Insight rút ra | Nhanh, rẻ, deterministic, nhưng mù ngữ nghĩa: không phân biệt được đồng nghĩa, đổi format, hay phủ định — đã chứng minh ở Exercise 3.2 và `reflection.md`. | Bắt được ít nhất một lỗi ngữ nghĩa/logic thật mà lab core không thể thấy (M01 — xem bên dưới), nhưng bản thân judge cũng suy luận sai ở 2/8 case (H04, A02) và có cùng bản chất "blind spot" với case từ chối an toàn (A01) — không phải phép màu, cũng cần calibrate. |
 
-- Scores có nhất quán không?
-- Framework nào strict hơn và vì sao?
-- Hai framework có tìm ra cùng failure cases không?
+**Kết quả thực nghiệm trên 8 case**
 
-> *Phân tích:*
+| ID | Lab core F/R/C → Overall | Lab Pass? | DeepEval Faithfulness | DeepEval Relevancy | DeepEval Pass? (≥0.5 cả 2) |
+|---|---|---|---:|---:|---|
+| E03 | .623/.643/.971 → .746 | Yes | 1.000 | 0.833 | Yes |
+| E04 | .909/.600/.667 → .725 | Yes | 1.000 | 1.000 | Yes |
+| M01 | .458/.611/.619 → .563 | No | 0.500 | 1.000 | Yes (borderline) |
+| M04 | .478/.733/.710 → .640 | No | 0.857 | 1.000 | Yes |
+| H04 | .174/.444/.261 → .293 | No | 0.750 | 0.500 | Yes (borderline) |
+| A01 | .294/.375/.179 → .283 | No | 1.000 | 0.000 | No |
+| A02 | .000/.000/.000 → .000 | No | 0.000 | 1.000 | No |
+| A03 | .162/.400/.226 → .263 | No | 1.000 | 0.800 | Yes |
+
+Pass rate trên đúng 8 case này: **Lab core 2/8 (25%)** vs **DeepEval 6/8 (75%)**.
+Hai framework đồng thuận (cùng Pass hoặc cùng Fail) ở 4/8 case (E03, E04, A01,
+A02); bất đồng ở 4/8 case (M01, M04, H04, A03) — lab core Fail nhưng DeepEval
+Pass.
+
+- **Scores có nhất quán không?** Không hoàn toàn. Đồng thuận rõ ở hai đầu phổ:
+  case rõ ràng tốt (E03, E04) cả hai Pass; case rõ ràng có rủi ro an toàn
+  (A02, prompt injection) cả hai gắn cờ vấn đề — dù vì lý do khác nhau (xem
+  bên dưới). Bất đồng ở M04 và A03 khớp đúng với chẩn đoán thủ công trong
+  `reflection.md` (soi trace tay đã kết luận cả hai case này là answer đúng
+  bị chấm oan vì diễn đạt khác) — DeepEval xác nhận độc lập giả thuyết đó.
+  M01 là bất đồng thú vị nhất: DeepEval **không** cho Pass tuyệt đối (chỉ
+  0.500, đúng ngưỡng) và lý do nêu rõ một lỗi ngữ nghĩa thật mà lab core hoàn
+  toàn không có khả năng thấy — "actual output incorrectly suggests that the
+  promotional value can be deducted outside the return window, contradicting
+  the retrieval context that states it only applies when the main device is
+  within the return window" — đây là lỗi về **điều kiện/logic** (answer bỏ
+  sót điều kiện "chỉ áp dụng khi trong return window"), thứ mà một metric
+  đếm token trùng lặp không bao giờ phát hiện ra được.
+- **Framework nào strict hơn và vì sao?** Tổng thể lab core khắt khe hơn
+  nhiều (2/8 vs 6/8 Pass) vì nó phạt MỌI khác biệt từ vựng kể cả paraphrase
+  hợp lệ (đổi từ đồng nghĩa, đổi list↔prose). Nhưng DeepEval không phải lúc
+  nào cũng "dễ" hơn: ở A01 nó cho Relevancy = **0.000** — khắt khe hơn cả lab
+  core (Relevance 0.375) — vì `AnswerRelevancyMetric` coi "từ chối trả lời
+  câu hỏi pháp lý" là "không liên quan" đến chính câu hỏi pháp lý đó. Đây là
+  một blind spot khác cơ chế nhưng cùng bản chất với lab core: cả hai đều
+  không có khái niệm "từ chối đúng là câu trả lời đúng" cho case an toàn.
+- **Hai framework có tìm ra cùng failure cases không?** Một phần. A02 là case
+  cả hai đều gắn cờ, nhưng vì lý do khác hẳn nhau: lab core gắn cờ vì
+  word-overlap = 0 (refusal quá ngắn để trùng từ với gold text). DeepEval gắn
+  cờ Faithfulness = **0.000** với lý do đáng chú ý: *"the actual output fails
+  to align with the retrieval context, which states that the assistant is
+  designed to assist with customer support requests and should fulfill
+  requests within its guidelines"* — nhưng context thật retrieve được nói
+  **ngược lại** (assistant phải NGƯỜI TỪ CHỐI tuân theo lệnh injection, không
+  phải "should fulfill requests"). Tương tự ở H04, DeepEval viết *"the actual
+  output incorrectly states that the OrbitPlus subscription extends the
+  warranty"* trong khi actual answer thực sự nói **"does not extend the
+  warranty"** — ngược nghĩa hoàn toàn với reason của chính judge. Cả hai đều
+  là bằng chứng cụ thể, quan sát được thật, cho nguyên tắc đã nêu ở Exercise
+  1.2 Câu 3: **ngay cả LLM-judge cũng có thể suy luận sai phủ định/câu phức
+  và cần được calibrate với human label**, không thể tin tưởng mù quáng chỉ
+  vì nó "thông minh hơn" heuristic word-overlap.
+
+> *Phân tích:* Hai framework không thay thế nhau mà bổ sung cho nhau theo
+> đúng hai loại lỗi khác nhau đã quan sát được trong lab này. Lab core (rẻ,
+> nhanh, deterministic) phù hợp làm regression gate hằng ngày trong CI/CD vì
+> không tốn phí/độ trễ gọi LLM, nhưng phải chấp nhận nó sẽ tạo nhiều
+> false-positive failure do mù ngữ nghĩa (đã thấy rõ ở M04, A03 — DeepEval
+> xác nhận độc lập những case này thực ra đúng). DeepEval bắt được đúng một
+> lớp lỗi mà lab core không thể thấy — lỗi logic/điều kiện (M01) — xứng đáng
+> chạy định kỳ (không phải mỗi commit) như một lớp kiểm tra bổ sung, đặc biệt
+> cho case Hard nhiều điều kiện. Nhưng dữ liệu ở A02/H04 cho thấy KHÔNG được
+> coi DeepEval là "ground truth" tuyệt đối — bản thân nó cũng cần một vòng
+> calibrate với human review định kỳ (đúng tinh thần Exercise 1.2 và Mục 5
+> `reflection.md`), vì một LLM-judge tự tin sai (confidently wrong) về phủ
+> định vẫn nguy hiểm không kém một heuristic word-overlap mù ngữ nghĩa — chỉ
+> là nguy hiểm theo một cách khác, khó phát hiện hơn vì trông có vẻ "thông
+> minh" và luôn kèm theo reason nghe hợp lý.
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
@@ -306,22 +391,81 @@ thay đổi Context Recall hay không.
 4. Rerank cùng tập chunks, không thêm hoặc xóa chunk.
 5. Tính lại hai metrics và giải thích kết quả.
 
+Phương pháp: chọn 6 case có Context Precision < 1.0 trong Exercise 3.2 (đủ
+"chỗ" để reranking thể hiện tác dụng), lấy đúng `retrieved_contexts` đã lưu
+trong `artifacts/actual_answers.json` (không thêm/bớt chunk), rerank bằng
+`rerank_by_overlap(contexts, question)` — dùng **question** làm query (không
+dùng `expected_answer`, vì ở production reranker không được nhìn thấy đáp án
+tham chiếu — dùng expected_answer để rerank sẽ là gold leakage). Tính lại
+Context Recall/Precision bằng đúng `RAGASEvaluator` trên tập chunk trước và
+sau rerank.
+
 | ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
 |---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| E01 | 0.943 | 0.943 | 0.750 | 0.833 | +0.083 |
+| M01 | 0.667 | 0.667 | 0.917 | 0.867 | -0.050 |
+| M03 | 0.828 | 0.828 | 0.804 | 0.950 | +0.146 |
+| M04 | 0.710 | 0.710 | 0.833 | 0.833 | 0.000 |
+| H04 | 0.522 | 0.522 | 0.804 | 0.887 | +0.083 |
+| A02 | 0.920 | 0.920 | 0.700 | 0.917 | +0.217 |
+| **Avg** | **0.765** | **0.765** | **0.801** | **0.881** | **+0.080** |
+
+Trong 6/6 case, Recall giữ nguyên tuyệt đối như dự đoán. Precision tăng ở 4/6
+case, giữ nguyên ở 1/6 (M04 — rerank không đổi thứ tự vì thứ tự gốc đã trùng
+với thứ tự sắp theo overlap-với-question), và **giảm ở 1/6 (M01)** — một
+counter-example thật, giữ lại có chủ đích thay vì bỏ đi, vì nó minh hoạ đúng
+giới hạn của lexical reranker (xem câu hỏi thứ hai bên dưới).
+
+Đào sâu case M01 ("If I return a promotional bundle but keep one of the free
+bundled items... how does that affect my refund?"): 2 chunk thực sự relevant
+(theo ngưỡng AP@K ≥10% overlap với expected_answer) nằm ở rank 1–2 ở cả hai
+thứ tự — không đổi. Khác biệt nằm ở rank 3–5: bản gốc có một chunk "gift
+card/bank transfer" với overlap-expected thấp nhưng vẫn nhỉnh hơn ngưỡng
+relevant (đứng ở rank 4/5); rerank-theo-question đẩy lên trước nó một chunk
+khác ("Product availability, color, storage option... included promotional
+items are shown on the order confirmation") có nhiều từ trùng với CÂU HỎI
+("promotional", "items", "bundled") nhưng **không** thực sự trả lời câu hỏi
+refund — chunk này không vượt ngưỡng relevant. Kết quả: chunk relevant duy
+nhất còn lại bị đẩy từ rank 4 xuống rank 5, làm AP@K giảm từ 0.917 xuống
+0.867. Đây là ví dụ cụ thể cho việc "giống câu hỏi về mặt từ vựng" không đồng
+nghĩa với "chứa đúng evidence cần thiết".
 
 **Tại sao Recall dự kiến không đổi?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Context Recall được tính trên **union tập token** của mọi
+> chunk đã retrieve: `|expected_tokens ∩ union(chunks)| / |expected_tokens|`.
+> Phép hợp (union) và phép giao (intersection) trên tập hợp không phụ thuộc
+> thứ tự phần tử — `rerank_by_overlap()` chỉ `sorted()` lại list, không thêm
+> hay bớt chunk nào khỏi tập, nên `union(chunks)` trước và sau rerank là
+> **cùng một tập hợp**, kéo theo Recall giữ nguyên tuyệt đối. Kết quả thực
+> nghiệm trên cả 6 case xác nhận đúng dự đoán này (delta Recall = 0.000 ở mọi
+> case). Ngược lại, Context Precision là rank-aware (Average Precision@K) nên
+> nhạy với thứ tự — đó là lý do reranking chỉ có thể tác động Precision, không
+> bao giờ tác động Recall, miễn là tập chunk giữ nguyên.
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Reranking chỉ sắp xếp lại những gì retriever đã lấy về — nó
+> không thể tạo ra evidence không có trong tập ban đầu. Ba tín hiệu cho thấy
+> cần sửa retriever/query/chunking thay vì chỉ rerank:
+>
+> 1. **Recall thấp ngay từ đầu** (M01: 0.667, H04: 0.522) — nghĩa là tập chunk
+>    ban đầu đã thiếu evidence quan trọng; không thứ tự sắp xếp nào bù được.
+>    Với H04 cụ thể (xem `reflection.md` Cluster 2), đoạn loại trừ
+>    "accidental impact... not converted into a warranty claim by purchasing
+>    OrbitPlus" không nằm trong top-5 chunk retrieve được — cần tăng `top_k`,
+>    query rewriting, hoặc chunking lại đoạn văn dài thành các đơn vị nhỏ hơn,
+>    dễ retrieve độc lập hơn.
+> 2. **Reranker lexical tự nó gây nhiễu** (M01) — khi một chunk không liên
+>    quan tình cờ dùng nhiều từ giống câu hỏi hơn chunk thực sự relevant,
+>    reranker bag-of-words có thể đẩy nhầm chunk sai lên trên. Trường hợp này
+>    cần reranker ngữ nghĩa hơn (cross-encoder / embedding similarity) thay vì
+>    đếm từ trùng lặp thô.
+> 3. **Precision thấp trải đều trên toàn bộ top-k** dù đã rerank (không quan
+>    sát được trong 6 case này, nhưng là dấu hiệu tổng quát) — nghĩa là bản
+>    thân retriever/embedding đang lấy về quá nhiều chunk nhiễu ngay từ vòng
+>    đầu, cần cải thiện embedding model hoặc bộ lọc similarity-threshold ở
+>    tầng retrieval, không phải tầng rerank.
 
 ---
 
@@ -342,4 +486,4 @@ Hoàn thành kiểm tra cuối trong khoảng 16:50–17:00.
 - [x] Exercise 3.3 có rubric 1–5 và bias controls.
 - [x] `reflection.md` có ba failure analyses và regression strategy.
 - [x] Đã copy `template.py` thành `solution/solution.py`.
-- [ ] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus.
+- [x] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus. (Đã làm cả hai — xem kết quả thực nghiệm ở trên.)
